@@ -1,5 +1,5 @@
 module changelog_d;
-enum codePackageLink = "https://code.dlang.org/packages/changelog_d";
+enum codePackageLink = "https://code.dlang.org/packages/changelog-d";
 enum contributeAt = "https://github.com/MrcSnm/changelog-d";
 struct CommitInfo
 {
