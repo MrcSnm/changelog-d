@@ -56,6 +56,10 @@ ChangelogReport parseChangelog(string gitLog, out string out_Error)
         string desc = v[keyEnd..$];
         report[key]~= CommitInfo(commitHash, tag, desc);
     }
+    if(report is null)
+    {
+        out_Error~= "gitLog is completely empty";
+    }
     return report;
 }
 
@@ -86,7 +90,7 @@ string formatChangelog(ChangelogReport report, string workingDir = null, bool in
             output~= "\n\n";
         output~= "## "~key.capitalize;
         foreach(v; value)
-            output~="\n-"~v.desc;
+            output~="\n- "~v.desc;
     }
     if(includeFooter)
     {
