@@ -14,7 +14,7 @@
 		}
 	],
 	"copyright": "Copyright © 2024, Marcelo",
-	"description": "A minimal D application.",
+	"description": "Tool for generating changelogs using git for the D programming language",
 	"license": "BSL-1.0",
 	"name": "changelog-d"
 }
