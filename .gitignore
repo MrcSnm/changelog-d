@@ -1,0 +1,16 @@
+.dub
+docs.json
+__dummy.html
+docs/
+/changelog-d
+changelog-d.so
+changelog-d.dylib
+changelog-d.dll
+changelog-d.a
+changelog-d.lib
+changelog-d-test-*
+*.exe
+*.pdb
+*.o
+*.obj
+*.lst

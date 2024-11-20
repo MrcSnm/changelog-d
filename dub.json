@@ -1,0 +1,20 @@
+{
+	"authors": [
+		"Marcelo"
+	],
+	"configurations": [
+		{
+			"name": "cli",
+			"versions": ["CLI"],
+			"targetType": "executable"
+		},
+		{
+			"name": "library",
+			"targetType": "library"
+		}
+	],
+	"copyright": "Copyright © 2024, Marcelo",
+	"description": "A minimal D application.",
+	"license": "BSL-1.0",
+	"name": "changelog-d"
+}
