@@ -1,22 +1,31 @@
 module changelog_d;
 enum codePackageLink = "https://code.dlang.org/packages/changelog-d";
 enum contributeAt = "https://github.com/MrcSnm/changelog-d";
+enum changelogdVersion = "v1.0.3";
+
 struct CommitInfo
 {
     string hash;
     string tag;
     string desc;
 }
-alias ChangelogReport = CommitInfo[][string];
+
+struct ChangelogReport
+{
+    string from;
+    string to;
+    CommitInfo[][string] keysDescription;
+}
 
 
-ChangelogReport parseChangelog(string gitLog, out string out_Error)
+bool parseChangelog(string gitLog, out ChangelogReport out_Changelog, out string out_Error, string from, string to)
 {
     import std.algorithm.searching:countUntil;
     import std.string:strip;
     import std.string:lineSplitter;
     import std.uni: toLowerInPlace;
-    ChangelogReport report;
+    CommitInfo[][string] report;
+
     foreach(string v; lineSplitter(gitLog.strip))
     {
         string commitHash = v[0..7];
@@ -32,7 +41,7 @@ ChangelogReport parseChangelog(string gitLog, out string out_Error)
                 if(space != -1 && tagEnd == -1)
                 {
                     out_Error = "Unexpected format for tags while reading "~v;
-                    return null;
+                    return false;
                 }
                 if(space < tagEnd)
                 {
@@ -59,8 +68,10 @@ ChangelogReport parseChangelog(string gitLog, out string out_Error)
     if(report is null)
     {
         out_Error~= "gitLog is completely empty";
+        return false;
     }
-    return report;
+    out_Changelog = ChangelogReport(from, to, report);
+    return true;
 }
 
 /**
@@ -71,7 +82,7 @@ ChangelogReport parseChangelog(string gitLog, out string out_Error)
  *   includeFooter = Whether it should include the footer. Please keep it as it might get more people to help on that project
  * Returns:
  */
-string formatChangelog(ChangelogReport report, string workingDir = null, bool includeFooter = true)
+string formatChangelog(const ChangelogReport report, string workingDir = null, bool includeFooter = true)
 {
     import std.string:capitalize, strip;
     import std.path;
@@ -79,12 +90,12 @@ string formatChangelog(ChangelogReport report, string workingDir = null, bool in
     string output;
     {
         import std.process;
-        auto repoName = executeShell("git rev-parse --show-toplevel");
+        auto repoName = executeShell("git rev-parse --show-toplevel", null, Config.none, size_t.max, workingDir);
         if(repoName.status == 0)
-            output~= "# Changelog for "~baseName(repoName.output.strip);
+            output~= "# Changelog for "~baseName(repoName.output.strip)~" "~report.to;
 
     }
-    foreach(string key, CommitInfo[] value; report)
+    foreach(string key, const CommitInfo[] value; report.keysDescription)
     {
         if(output !is null)
             output~= "\n\n";
@@ -94,26 +105,12 @@ string formatChangelog(ChangelogReport report, string workingDir = null, bool in
     }
     if(includeFooter)
     {
-        import std.process;
-        string changelog_d_Version;
-        string cwd = std.file.getcwd();
-        if(workingDir != null)
-            chdir(workingDir);
-        scope(exit)
-        {
-            if(workingDir != null)
-                chdir(cwd);
-        }
-        auto res = executeShell("git describe --tags --abbrev=0");
-        if(res.status == 0)
-
-            changelog_d_Version = res.output.strip;
         output~=
 `
 
 |Changelog Metadata|
 |------------------:|
-|Generated with [changelog-d](`~codePackageLink~`) `~changelog_d_Version~`|
+|Generated with [changelog-d](`~codePackageLink~`) `~changelogdVersion~`|
 |Contribute at `~contributeAt~`|
 `;
     }
@@ -132,7 +129,7 @@ string formatChangelog(ChangelogReport report, string workingDir = null, bool in
  *   keepTags =
  * Returns:
  */
-ChangelogReport generateChangelog(string fromBranch, string toBranch, out string out_Error)
+bool generateChangelog(out ChangelogReport out_Changelog, string fromBranch, string toBranch, out string out_Error)
 {
 	import std.process;
 	enum isNotGitRepo = 128;
@@ -143,22 +140,22 @@ ChangelogReport generateChangelog(string fromBranch, string toBranch, out string
 	if(gitCode == hasNoGitPosix || gitCode == hasNoGitWindows)
 	{
 		out_Error = "Git is not installed on your PC. Install it before you can run changelog-d";
-		return null;
+		return false;
 	}
 	if(gitCode == isNotGitRepo)
 	{
 		out_Error = "Not running in a git repository for being able to execute changelog-d";
-		return null;
+		return false;
 	}
 
     auto res = executeShell("git log "~fromBranch~".."~toBranch~" --oneline --decorate");
     if(res.status != 0)
     {
         out_Error = "Could not execute git log using branches: " ~ fromBranch~ ".."~ toBranch~ "\nOutput: " ~ res.output;
-        return null;
+        return false;
     }
 
-	return parseChangelog(res.output, out_Error);
+	return parseChangelog(res.output, out_Changelog, out_Error, fromBranch, toBranch);
 }
 
 version(CLI)
@@ -185,8 +182,8 @@ int main(string[] args)
         defaultGetoptPrinter("changelog-d requires both --from and --to arguments:\n", res.options);
         return 1;
     }
-    ChangelogReport report = generateChangelog(from, to, out_Error);
-    if(report is null)
+    ChangelogReport report;
+    if(!generateChangelog(report, from, to, out_Error))
     {
         writeln(out_Error);
         return 1;
@@ -323,8 +320,9 @@ b15a6b2 (tag: v1.7.4) Fixed: Made the output shorter when uusing up to date buil
 `;
 
     string err;
-    ChangelogReport report = parseChangelog(reportExample, err);
-    assert(err is null, "Some error ocurred while reading valid report: '"~err~"'");
+    ChangelogReport report;
+    if(!parseChangelog(reportExample, report, err, "0", "0"))
+        assert(false, "Some error ocurred while reading valid report: '"~err~"'");
     import std.stdio;
     writeln = formatChangelog(report);
 }
