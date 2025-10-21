@@ -1,7 +1,7 @@
 module changelog_d;
 enum codePackageLink = "https://code.dlang.org/packages/changelog-d";
 enum contributeAt = "https://github.com/MrcSnm/changelog-d";
-enum changelogdVersion = "v1.0.3";
+enum changelogdVersion = "v1.1.0";
 
 struct CommitInfo
 {
@@ -17,14 +17,29 @@ struct ChangelogReport
     CommitInfo[][string] keysDescription;
 }
 
+struct ChangelogConfig
+{
 
-bool parseChangelog(string gitLog, out ChangelogReport out_Changelog, out string out_Error, string from, string to)
+    ///allowDuplicates = If it is allowed to have duplicate commit messages
+    bool allowDuplicates;
+    ///allowMege = If it is allowed to have merge branch commit messages
+    bool allowMerge;
+    ///skips the merge PR formatting hot link
+    bool skipMergePRFormatting;
+    string remote = "origin";
+}
+
+
+bool parseChangelog(string gitLog, out ChangelogReport out_Changelog, out string out_Error, string from, string to, ChangelogConfig cfg)
 {
     import std.algorithm.searching:countUntil;
     import std.string:strip;
-    import std.string:lineSplitter;
+    import std.string:lineSplitter, startsWith;
     import std.uni: toLowerInPlace;
     CommitInfo[][string] report;
+
+    alias ReportEntries = bool[string];
+    ReportEntries[string] duplicateChecker;
 
     foreach(string v; lineSplitter(gitLog.strip))
     {
@@ -63,7 +78,18 @@ bool parseChangelog(string gitLog, out ChangelogReport out_Changelog, out string
         else
             keyEnd = 0;
         string desc = v[keyEnd..$];
-        report[key]~= CommitInfo(commitHash, tag, desc);
+        bool isDuplicate = true;
+        if(!(key in duplicateChecker) || !(desc in duplicateChecker[key]))
+        {
+            isDuplicate = false;
+            duplicateChecker[key][desc] = true;
+        }
+        bool isMerge = desc.startsWith("Merge branch ");
+        bool shouldAppend = (cfg.allowDuplicates && isDuplicate) || !isDuplicate;
+        shouldAppend = shouldAppend && ((isMerge && cfg.allowMerge) || !isMerge);
+
+        if(shouldAppend)
+            report[key]~= CommitInfo(commitHash, tag, desc);
     }
     if(report is null)
     {
@@ -82,26 +108,62 @@ bool parseChangelog(string gitLog, out ChangelogReport out_Changelog, out string
  *   includeFooter = Whether it should include the footer. Please keep it as it might get more people to help on that project
  * Returns:
  */
-string formatChangelog(const ChangelogReport report, string workingDir = null, bool includeFooter = true)
+string formatChangelog(const ChangelogReport report, const ChangelogConfig cfg, string workingDir = null, bool includeFooter = true)
 {
-    import std.string:capitalize, strip;
+    import std.process;
+    import std.string:capitalize, strip, startsWith;
+    import std.conv:to;
+    import std.algorithm:countUntil;
     import std.path;
+    import std.format;
     import std.file;
+    enum mergePr = "Merge pull request ";
     string output;
     {
-        import std.process;
         auto repoName = executeShell("git rev-parse --show-toplevel", null, Config.none, size_t.max, workingDir);
         if(repoName.status == 0)
             output~= "# Changelog for "~baseName(repoName.output.strip)~" "~report.to;
-
     }
+    string baseRepo;
+    if(!cfg.skipMergePRFormatting)
+    {
+        auto repoRemote = executeShell("git remote get-url "~cfg.remote, null, Config.none, size_t.max, workingDir);
+        if(repoRemote.status != 0)
+            throw new Exception("git remote get-url "~cfg.remote~" returned non zero: "~repoRemote.output);
+        baseRepo = repoRemote.output;
+    }
+
+    static string getRepoNameInOrigin(string repo)
+    {
+        if(repo.startsWith("git@github.com"))
+            return repo["git@github.com:".length..$-5]; //Removes .git
+        else if(repo.startsWith("https://github.com/"))
+            return repo["https://github.com/".length..$-5]; //Removes .git
+        return repo;
+    }
+    bool isGithub = baseRepo.countUntil("github.com") != -1;
+    string repoInOrigin = isGithub ? getRepoNameInOrigin(baseRepo) : null;
+
     foreach(string key, const CommitInfo[] value; report.keysDescription)
     {
         if(output !is null)
             output~= "\n\n";
         output~= "## "~key.capitalize;
         foreach(v; value)
-            output~="\n- "~v.desc;
+        {
+            string desc = v.desc;
+            if(baseRepo && desc.startsWith(mergePr))
+            {
+                //Merge pull request #54 from KitsunebiGames/remove-implicit-update
+                auto nextSpace = desc[mergePr.length..$].countUntil(" ");
+                if(nextSpace != -1 && isGithub)
+                {
+                    string prNumber = desc[mergePr.length+1..mergePr.length+nextSpace]; //Advances the #
+                    desc = format("Merge pull request [#%s](https://github.com/%s/pull/%s) %s", prNumber, repoInOrigin, prNumber, desc[mergePr.length+nextSpace..$]);
+                }
+            }
+            output~="\n- "~desc;
+        }
     }
     if(includeFooter)
     {
@@ -124,12 +186,15 @@ string formatChangelog(const ChangelogReport report, string workingDir = null, b
  * The Key will store multiple values to generate in the report
  *
  * Params:
- *   fromBranch =
- *   toBranch =
- *   keepTags =
+ *   out_Changelog = Output changelog to generate
+ *   fromBranch = Source branch
+ *   toBranch = Target branch to generate changelog
+ *   out_Error = If an error ocurred while rtying to parse
+ *   cfg = Configuration for the generated changelog
+ *
  * Returns:
  */
-bool generateChangelog(out ChangelogReport out_Changelog, string fromBranch, string toBranch, out string out_Error)
+bool generateChangelog(out ChangelogReport out_Changelog, string fromBranch, string toBranch, out string out_Error, ChangelogConfig cfg)
 {
 	import std.process;
 	enum isNotGitRepo = 128;
@@ -155,7 +220,7 @@ bool generateChangelog(out ChangelogReport out_Changelog, string fromBranch, str
         return false;
     }
 
-	return parseChangelog(res.output, out_Changelog, out_Error, fromBranch, toBranch);
+	return parseChangelog(res.output, out_Changelog, out_Error, fromBranch, toBranch, cfg);
 }
 
 version(CLI)
@@ -167,10 +232,17 @@ int main(string[] args)
     string out_Error;
 
     string from, to, outputFile = "Changelog.md";
+    bool allowDuplicates, allowMerge;
+
+    ChangelogConfig cfg;
 
     GetoptResult res = getopt(args,
     "from", "The from branch which this program will calculate the log [can also be a tag]", &from,
     "to", "The to branch which this program will get the log", &to,
+    "allow-duplicates", "Changelog-d removes duplicate commits messages by default", &cfg.allowDuplicates,
+    "allow-merge", "Changelog-d removes merge commits messages by default", &cfg.allowMerge,
+    "skip-pr", "Skips the PR merge formatting", &cfg.skipMergePRFormatting,
+    "remote", "Sets the remote from which the PRs are formatted. Defaults to origin", &cfg.remote,
     "output", "Output file path. Defaults to Changelog.md",  &outputFile);
     if(res.helpWanted)
     {
@@ -183,12 +255,12 @@ int main(string[] args)
         return 1;
     }
     ChangelogReport report;
-    if(!generateChangelog(report, from, to, out_Error))
+    if(!generateChangelog(report, from, to, out_Error, cfg))
     {
         writeln(out_Error);
         return 1;
     }
-    string formatted = formatChangelog(report);
+    string formatted = formatChangelog(report, cfg);
     std.file.write(outputFile, formatted);
 	return 0;
 }
