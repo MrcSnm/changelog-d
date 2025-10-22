@@ -1,7 +1,7 @@
 module changelog_d;
 enum codePackageLink = "https://code.dlang.org/packages/changelog-d";
 enum contributeAt = "https://github.com/MrcSnm/changelog-d";
-enum changelogdVersion = "v1.1.0";
+enum changelogdVersion = "v1.1.1";
 
 struct CommitInfo
 {
@@ -141,6 +141,40 @@ string formatChangelog(const ChangelogReport report, const ChangelogConfig cfg, 
             return repo["https://github.com/".length..$-5]; //Removes .git
         return repo;
     }
+
+    //Parse the #9999 [number] to generate a issue link
+    static string addIssuesLink(string desc, string baseRepo, string repoInOrigin)
+    {
+        import std.ascii:isDigit;
+        if(!baseRepo)
+            return desc;
+        string finalDesc = null;
+        long idx = -1;
+        do
+        {
+            idx = countUntil(desc, "#");
+            if(idx != -1)
+            {
+                finalDesc~= desc[0..idx];
+                desc = desc[idx+1..$];
+                ///next non digit
+                idx = countUntil!((ch => !ch.isDigit))(desc);
+                if(idx != -1)
+                {
+                    finalDesc~= format("[#%s](https://github.com/%s/pull/%s)", desc[0..idx], repoInOrigin, desc[0..idx]);
+                    desc = desc[idx..$];
+                }
+                else
+                    finalDesc~= "#";
+            }
+        } while(idx != -1);
+        if(finalDesc)
+        {
+            finalDesc~= desc;
+            desc = finalDesc;
+        }
+        return desc;
+    }
     bool isGithub = baseRepo.countUntil("github.com") != -1;
     string repoInOrigin = isGithub ? getRepoNameInOrigin(baseRepo) : null;
 
@@ -151,17 +185,7 @@ string formatChangelog(const ChangelogReport report, const ChangelogConfig cfg, 
         output~= "## "~key.capitalize;
         foreach(v; value)
         {
-            string desc = v.desc;
-            if(baseRepo && desc.startsWith(mergePr))
-            {
-                //Merge pull request #54 from KitsunebiGames/remove-implicit-update
-                auto nextSpace = desc[mergePr.length..$].countUntil(" ");
-                if(nextSpace != -1 && isGithub)
-                {
-                    string prNumber = desc[mergePr.length+1..mergePr.length+nextSpace]; //Advances the #
-                    desc = format("Merge pull request [#%s](https://github.com/%s/pull/%s) %s", prNumber, repoInOrigin, prNumber, desc[mergePr.length+nextSpace..$]);
-                }
-            }
+            string desc = addIssuesLink(v.desc, baseRepo, repoInOrigin);
             output~="\n- "~desc;
         }
     }
